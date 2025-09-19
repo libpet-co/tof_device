@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.8)
 project(nlink_parser)
 
+set(_export_set export_${PROJECT_NAME})
+set(SERIAL_EXPORT_SET ${_export_set})
+
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
 endif()
@@ -10,6 +13,12 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+ament_environment_hooks(
+  ${CMAKE_CURRENT_SOURCE_DIR}/env_hooks/ament_prefix_path.dsv
+  ${CMAKE_CURRENT_SOURCE_DIR}/env_hooks/ament_prefix_path.bash
+)
 
 add_subdirectory(extern/serial)
 
@@ -45,8 +54,9 @@ add_library(${nutils}
 
 target_include_directories(${nutils}
   PUBLIC
-    src/utils
-    extern/serial/include
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/utils>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern/serial/include>
+    $<INSTALL_INTERFACE:include/${PROJECT_NAME}/utils>
 )
 
 ament_target_dependencies(${nutils}
@@ -57,6 +67,8 @@ ament_target_dependencies(${nutils}
 target_link_libraries(${nutils}
   serial
 )
+
+set_property(TARGET ${nutils} APPEND PROPERTY INTERFACE_LINK_LIBRARIES serial)
 
 rosidl_target_interfaces(${nutils}
   ${PROJECT_NAME} "rosidl_typesupport_cpp"
@@ -186,10 +198,16 @@ install(TARGETS
   ${tofsensem_executable}
   ${linktrack_aoa_executable}
   ${iot_executable}
-  EXPORT export_${PROJECT_NAME}
+  EXPORT ${_export_set}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+
+install(DIRECTORY src/utils/
+  DESTINATION include/${PROJECT_NAME}/utils
+  FILES_MATCHING PATTERN "*.h"
 )
 
 install(DIRECTORY launch config rviz
@@ -201,7 +219,13 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+install(FILES
+  env_hooks/ament_prefix_path.dsv
+  env_hooks/ament_prefix_path.bash
+  DESTINATION share/${PROJECT_NAME}/hook
+)
+
+ament_export_targets(${_export_set} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   geometry_msgs
   grid_map_msgs
@@ -212,3 +236,35 @@ ament_export_dependencies(
 )
 
 ament_package()
+
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/env_hooks)
+
+configure_file(
+  env_hooks/package.dsv.in
+  ${CMAKE_CURRENT_BINARY_DIR}/env_hooks/package.dsv
+  @ONLY
+)
+
+install(CODE "
+  file(COPY \"${CMAKE_CURRENT_BINARY_DIR}/env_hooks/package.dsv\"
+    DESTINATION \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}\")
+")
+
+set(_nlink_parser_package_dsv_append "source;share/${PROJECT_NAME}/local_setup.bash\nsource;share/${PROJECT_NAME}/local_setup.sh\nsource;share/${PROJECT_NAME}/local_setup.dsv\nsource;share/${PROJECT_NAME}/local_setup.zsh\n")
+
+install(CODE "
+  file(APPEND \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}/package.dsv\" \"${_nlink_parser_package_dsv_append}\")
+")
+
+install(CODE [[
+  set(_nlink_parser_local_setup "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/local_setup.bash")
+  if(EXISTS "${_nlink_parser_local_setup}")
+    file(READ "${_nlink_parser_local_setup}" _nlink_parser_local_setup_content)
+    if(NOT _nlink_parser_local_setup_content MATCHES "AMENT_PREFIX_PATH")
+      set(_needle "_colcon_prefix_bash_prepend_unique_value COLCON_PREFIX_PATH \"\$_colcon_prefix_bash_COLCON_CURRENT_PREFIX\"")
+      set(_replacement "${_needle}\n_colcon_prefix_bash_prepend_unique_value AMENT_PREFIX_PATH \"\$_colcon_prefix_bash_COLCON_CURRENT_PREFIX\"")
+      string(REPLACE "${_needle}" "${_replacement}" _nlink_parser_local_setup_content "${_nlink_parser_local_setup_content}")
+    endif()
+    file(WRITE "${_nlink_parser_local_setup}" "${_nlink_parser_local_setup_content}")
+  endif()
+]])
