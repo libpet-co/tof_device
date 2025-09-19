@@ -1,9 +1,10 @@
 #ifndef LINKTRACKINIT_H
 #define LINKTRACKINIT_H
 
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 #include <serial/serial.h>
 
+#include <memory>
 #include <unordered_map>
 
 #include "nlink_unpack/nlink_utils.h"
@@ -13,8 +14,8 @@ class NProtocolExtracter;
 namespace linktrack {
 class Init {
 public:
-  explicit Init(NProtocolExtracter *protocol_extraction,
-                serial::Serial *serial);
+  Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_extraction,
+       serial::Serial *serial);
 
 private:
   void initDataTransmission();
@@ -28,9 +29,10 @@ private:
   void initNodeFrame5(NProtocolExtracter *protocol_extraction);
   void initNodeFrame6(NProtocolExtracter *protocol_extraction);
 
-  std::unordered_map<NProtocolBase *, ros::Publisher> publishers_;
-  ros::NodeHandle nh_;
-  ros::Subscriber dt_sub_;
+  std::unordered_map<NProtocolBase *, rclcpp::PublisherBase::SharedPtr> publishers_;
+  rclcpp::Node::WeakPtr node_;
+  serial::Serial *serial_;
+  rclcpp::SubscriptionBase::SharedPtr dt_sub_;
 };
 } // namespace linktrack
 

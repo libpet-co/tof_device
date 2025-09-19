@@ -1,4 +1,3 @@
-
 #include "init.h"
 
 #include "nlink_protocol.h"
@@ -27,22 +26,28 @@ protected:
 } // namespace
 
 namespace tofsensem {
-nlink_parser::TofsenseMFrame0 g_msg_tofmframe0;
+using nlink_parser::msg::TofsenseMFrame0;
 
-Init::Init(NProtocolExtracter *protocol_extraction) {
+TofsenseMFrame0 g_msg_tofmframe0;
+
+Init::Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_extraction)
+    : node_(node) {
   InitFrame0(protocol_extraction);
 }
 
 void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
   static auto protocol = new ProtocolFrame0;
   protocol_extraction->AddProtocol(protocol);
-  protocol->SetHandleDataCallback([=] {
+  protocol->SetHandleDataCallback([this, protocol] {
+    auto node = node_.lock();
+    if (!node) {
+      return;
+    }
     if (!publishers_[protocol]) {
-      ros::NodeHandle nh_;
-      auto topic = "nlink_tofsensem_frame0";
-      publishers_[protocol] =
-          nh_.advertise<nlink_parser::TofsenseMFrame0>(topic, 50);
-      TopicAdvertisedTip(topic);
+      const auto topic = "nlink_tofsensem_frame0";
+      publishers_[protocol] = node->create_publisher<TofsenseMFrame0>(
+          topic, rclcpp::QoS(rclcpp::KeepLast(50)));
+      TopicAdvertisedTip(node->get_logger(), topic.c_str());
     }
 
     const auto &data = g_ntsm_frame0;
@@ -56,7 +61,14 @@ void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
       pixel.dis_status = src_pixel.dis_status;
       pixel.signal_strength = src_pixel.signal_strength;
     }
-    publishers_.at(protocol).publish(g_msg_tofmframe0);
+
+    auto iter = publishers_.find(protocol);
+    if (iter != publishers_.end()) {
+      auto publisher = std::static_pointer_cast<rclcpp::Publisher<TofsenseMFrame0>>(iter->second);
+      if (publisher) {
+        publisher->publish(g_msg_tofmframe0);
+      }
+    }
   });
 }
 

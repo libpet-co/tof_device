@@ -1,11 +1,10 @@
-
 #include "init.h"
 
 #include "nlink_protocol.h"
 #include "nlink_unpack/nlink_iot_frame0.h"
 #include "nlink_unpack/nlink_utils.h"
 #include "nutils.h"
-#include <string.h>
+#include <cstring>
 
 namespace {
 class ProtocolFrame0 : public NLinkProtocolVLength {
@@ -24,21 +23,29 @@ protected:
 } // namespace
 
 namespace iot {
-nlink_parser::IotFrame0 g_msg_iotframe0;
+using nlink_parser::msg::IotFrame0;
+using nlink_parser::msg::IotFrame0Node;
 
-Init::Init(NProtocolExtracter *protocol_extraction) {
+IotFrame0 g_msg_iotframe0;
+
+Init::Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_extraction)
+    : node_(node) {
   InitFrame0(protocol_extraction);
 }
 
 void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
   static auto protocol = new ProtocolFrame0;
   protocol_extraction->AddProtocol(protocol);
-  protocol->SetHandleDataCallback([=] {
+  protocol->SetHandleDataCallback([this, protocol] {
+    auto node = node_.lock();
+    if (!node) {
+      return;
+    }
     if (!publishers_[protocol]) {
-      ros::NodeHandle nh_;
-      auto topic = "nlink_iot_frame0";
-      publishers_[protocol] = nh_.advertise<nlink_parser::IotFrame0>(topic, 50);
-      TopicAdvertisedTip(topic);
+      const auto topic = "nlink_iot_frame0";
+      publishers_[protocol] = node->create_publisher<IotFrame0>(
+          topic, rclcpp::QoS(rclcpp::KeepLast(50)));
+      TopicAdvertisedTip(node->get_logger(), topic.c_str());
     }
 
     const auto &data = g_iot_frame0;
@@ -55,12 +62,17 @@ void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
       dst.aoa_angle_vertical = src.aoa_angle_vertical;
       dst.fp_rssi = src.fp_rssi;
       dst.rx_rssi = src.rx_rssi;
-      dst.user_data.clear();
-      dst.user_data.insert(dst.user_data.begin(), src.user_data,
-                           src.user_data + src.user_data_len);
+      dst.user_data.resize(src.user_data_len);
+      std::memcpy(dst.user_data.data(), src.user_data, src.user_data_len);
     }
 
-    publishers_.at(protocol).publish(g_msg_iotframe0);
+    auto iter = publishers_.find(protocol);
+    if (iter != publishers_.end()) {
+      auto publisher = std::static_pointer_cast<rclcpp::Publisher<IotFrame0>>(iter->second);
+      if (publisher) {
+        publisher->publish(g_msg_iotframe0);
+      }
+    }
   });
 }
 

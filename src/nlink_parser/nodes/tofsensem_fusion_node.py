@@ -21,90 +21,103 @@ point_step = 32
 """
 
 import math
-import numpy as np
 from collections import deque
+from typing import List
 
-import rospy
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+
+from geometry_msgs.msg import Point, Pose, Quaternion
+from grid_map_msgs.msg import GridMap, GridMapInfo
 from nlink_parser.msg import TofsenseMFrame0
 from sensor_msgs.msg import PointCloud2, PointField
-from std_msgs.msg import Header, Float32MultiArray, MultiArrayDimension
-import sensor_msgs.point_cloud2 as pc2
-
-from grid_map_msgs.msg import GridMap, GridMapInfo
-from geometry_msgs.msg import Pose, Point, Quaternion
+from sensor_msgs_py import point_cloud2 as pc2
+from std_msgs.msg import Float32MultiArray, Header, MultiArrayDimension
 
 
 def rad(deg: float) -> float:
     return deg * math.pi / 180.0
 
 
-class TofsenseMFusionNode:
-    def __init__(self):
+class TofsenseMFusionNode(Node):
+    def __init__(self) -> None:
+        super().__init__("tofsensem_fusion_node")
         # ---------- 基本参数 ----------
-        self.frame_id = rospy.get_param("~frame_id", "tofsensem_optical_frame")
-        self.topic_in = rospy.get_param("~topic_in", "/nlink_tofsensem_frame0")
-        self.topic_cloud = rospy.get_param("~topic_pointcloud", "/tofsensem/points")
-        self.topic_grid = rospy.get_param("~topic_gridmap", "/tofsensem/grid_map")
+        self.frame_id = self.declare_parameter("frame_id", "tofsensem_optical_frame").value
+        self.topic_in = self.declare_parameter("topic_in", "/nlink_tofsensem_frame0").value
+        self.topic_cloud = self.declare_parameter("topic_pointcloud", "/tofsensem/points").value
+        self.topic_grid = self.declare_parameter("topic_gridmap", "/tofsensem/grid_map").value
 
-        self.rows = int(rospy.get_param("~rows", 8))
-        self.cols = int(rospy.get_param("~cols", 8))
+        self.rows = int(self.declare_parameter("rows", 8).value)
+        self.cols = int(self.declare_parameter("cols", 8).value)
 
         # 视场角（度）
-        self.fov_x_deg = float(rospy.get_param("~fov_x_deg", 27.0))
-        self.fov_y_deg = float(rospy.get_param("~fov_y_deg", 27.0))
+        self.fov_x_deg = float(self.declare_parameter("fov_x_deg", 27.0).value)
+        self.fov_y_deg = float(self.declare_parameter("fov_y_deg", 27.0).value)
 
         # 有效性与滤波
-        self.min_range = float(rospy.get_param("~min_range", 0.02))  # m
-        self.max_range = float(rospy.get_param("~max_range", 2.0))   # m
-        self.drop_invalid = bool(rospy.get_param("~drop_invalid", True))
+        self.min_range = float(self.declare_parameter("min_range", 0.02).value)  # m
+        self.max_range = float(self.declare_parameter("max_range", 2.0).value)   # m
+        self.drop_invalid = bool(self.declare_parameter("drop_invalid", True).value)
 
-        self.filter_window = int(rospy.get_param("~filter_window", 3))
-        self.use_temporal_median = bool(rospy.get_param("~use_temporal_median", True))
+        self.filter_window = int(self.declare_parameter("filter_window", 3).value)
+        self.use_temporal_median = bool(self.declare_parameter("use_temporal_median", True).value)
 
         # 高程图分辨率估计
-        self.resolution_mode = rospy.get_param("~resolution_mode", "fixed")  # "fixed" or "dynamic"
-        self.nominal_distance = float(rospy.get_param("~nominal_distance", 2.0))  # m
-        self.layer_name = rospy.get_param("~layer_name", "elevation")
-        self.latch_grid = bool(rospy.get_param("~latch_grid", True))
+        self.resolution_mode = str(self.declare_parameter("resolution_mode", "fixed").value)
+        self.nominal_distance = float(self.declare_parameter("nominal_distance", 2.0).value)  # m
+        self.layer_name = str(self.declare_parameter("layer_name", "elevation").value)
+        self.latch_grid = bool(self.declare_parameter("latch_grid", True).value)
 
         # 深度定义：默认 "z"
-        self.depth_mode = rospy.get_param("~depth_mode", "z").lower()  # "z" or "los"
+        self.depth_mode = str(self.declare_parameter("depth_mode", "z").value).lower()
         if self.depth_mode not in ("z", "los"):
-            rospy.logwarn("~depth_mode 仅支持 'z' 或 'los'，已回退为 'z'")
+            self.get_logger().warn("~depth_mode 仅支持 'z' 或 'los'，已回退为 'z'")
             self.depth_mode = "z"
 
         # 可选调试
-        debug = bool(rospy.get_param("~debug", False))
-        debug_port = int(rospy.get_param("~debug_port", 5678))
+        debug = bool(self.declare_parameter("debug", False).value)
+        debug_port = int(self.declare_parameter("debug_port", 5678).value)
         if debug:
             try:
-                import debugpy
+                import debugpy  # type: ignore
+
                 debugpy.listen(("0.0.0.0", debug_port))
-                rospy.loginfo("Waiting for VS Code debugger on port %d...", debug_port)
+                self.get_logger().info("Waiting for VS Code debugger on port %d...", debug_port)
                 debugpy.wait_for_client()
-            except Exception as e:
-                rospy.logwarn("debugpy 初始化失败：%s", e)
+            except Exception as exc:  # pragma: no cover - optional debug
+                self.get_logger().warn(f"debugpy 初始化失败：{exc}")
 
         # ---------- 预计算像素 LUT ----------
         self._build_camera_lut()
 
         # ---------- 时间中值滤波 buffer ----------
         N = self.rows * self.cols
-        self.buffers = [deque(maxlen=self.filter_window) for _ in range(N)]
+        self.buffers: List[deque] = [deque(maxlen=self.filter_window) for _ in range(N)]
 
         # ---------- ROS pub/sub ----------
-        self.pub_cloud = rospy.Publisher(self.topic_cloud, PointCloud2, queue_size=1)
-        self.pub_grid = rospy.Publisher(self.topic_grid, GridMap, queue_size=1, latch=self.latch_grid)
-        self.sub = rospy.Subscriber(self.topic_in, TofsenseMFrame0, self.cb, queue_size=10)
+        self.pub_cloud = self.create_publisher(PointCloud2, self.topic_cloud, QoSProfile(depth=1))
+        grid_qos = QoSProfile(depth=1)
+        if self.latch_grid:
+            grid_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.pub_grid = self.create_publisher(GridMap, self.topic_grid, grid_qos)
+        self.sub = self.create_subscription(TofsenseMFrame0, self.topic_in, self.cb, 10)
 
-        rospy.loginfo(
+        self.get_logger().info(
             "tofsensem_fusion (depth_mode=%s): rows=%d cols=%d FOVx=%.1f FOVy=%.1f max_range=%.2f mode=%s",
-            self.depth_mode, self.rows, self.cols, self.fov_x_deg, self.fov_y_deg,
-            self.max_range, self.resolution_mode
+            self.depth_mode,
+            self.rows,
+            self.cols,
+            self.fov_x_deg,
+            self.fov_y_deg,
+            self.max_range,
+            self.resolution_mode,
         )
 
     # === LUT 构建（小孔模型） ===
-    def _build_camera_lut(self):
+    def _build_camera_lut(self) -> None:
         """
         构建：
           - self.u_lut, self.v_lut：像平面归一化坐标（以 z=1 的比例，= x/z, y/z）
@@ -143,53 +156,44 @@ class TofsenseMFusionNode:
     @staticmethod
     def _saturate_uint8(val) -> int:
         try:
-            v = int(val)
+            value = int(val)
         except Exception:
-            v = 0
-        return max(0, min(255, v))
+            value = 0
+        return max(0, min(255, value))
 
-    def _extract_intensity(self, p) -> int:
-        """
-        从像素中提取强度（若无相关字段则返回 0）：
-        优先顺序：amp/intensity/strength/conf
-        """
+    def _extract_intensity(self, pixel) -> int:
+        """从像素中提取强度（若无相关字段则返回 0）。"""
         cand = None
         for name in ("amp", "intensity", "strength", "conf"):
-            if hasattr(p, name):
-                cand = getattr(p, name)
+            if hasattr(pixel, name):
+                cand = getattr(pixel, name)
                 break
         return self._saturate_uint8(cand if cand is not None else 0)
 
     def _pc2_from_points(self, points):
-        """
-        将点列表（每点 10 元素：x,y,z,intensity,return_type,channel,azimuth,elevation,distance,time_stamp）
-        打包为 PointCloud2，字段偏移严格对应 C++ offsetof。
-        """
+        """将点列表打包为 PointCloud2。"""
         header = Header()
-        header.stamp = rospy.Time.now()
+        header.stamp = self.get_clock().now().to_msg()
         header.frame_id = self.frame_id
 
-        # 偏移布局：
-        # x:0, y:4, z:8, intensity:12(u8), return_type:13(u8), channel:14(u16),
-        # azimuth:16, elevation:20, distance:24, time_stamp:28(u32)
         fields = [
-            PointField('x', 0,  PointField.FLOAT32, 1),
-            PointField('y', 4,  PointField.FLOAT32, 1),
-            PointField('z', 8,  PointField.FLOAT32, 1),
-            PointField('intensity',   12, PointField.UINT8,   1),
-            PointField('return_type', 13, PointField.UINT8,   1),
-            PointField('channel',     14, PointField.UINT16,  1),
-            PointField('azimuth',     16, PointField.FLOAT32, 1),
-            PointField('elevation',   20, PointField.FLOAT32, 1),
-            PointField('distance',    24, PointField.FLOAT32, 1),
-            PointField('time_stamp',  28, PointField.UINT32,  1),
+            PointField("x", 0, PointField.FLOAT32, 1),
+            PointField("y", 4, PointField.FLOAT32, 1),
+            PointField("z", 8, PointField.FLOAT32, 1),
+            PointField("intensity", 12, PointField.UINT8, 1),
+            PointField("return_type", 13, PointField.UINT8, 1),
+            PointField("channel", 14, PointField.UINT16, 1),
+            PointField("azimuth", 16, PointField.FLOAT32, 1),
+            PointField("elevation", 20, PointField.FLOAT32, 1),
+            PointField("distance", 24, PointField.FLOAT32, 1),
+            PointField("time_stamp", 28, PointField.UINT32, 1),
         ]
         return pc2.create_cloud(header, fields, points)
 
     def _gridmap_info(self, resolution, len_x, len_y):
         info = GridMapInfo()
         info.header.frame_id = self.frame_id
-        info.header.stamp = rospy.Time.now()
+        info.header.stamp = self.get_clock().now().to_msg()
         info.resolution = float(resolution)
         info.length_x = float(len_x)
         info.length_y = float(len_y)
@@ -202,49 +206,41 @@ class TofsenseMFusionNode:
     def _pack_layer(self, grid_2d):
         arr = Float32MultiArray()
         dim_col = MultiArrayDimension(label="column_index", size=self.cols, stride=self.cols * self.rows)
-        dim_row = MultiArrayDimension(label="row_index",  size=self.rows, stride=self.rows)
+        dim_row = MultiArrayDimension(label="row_index", size=self.rows, stride=self.rows)
         arr.layout.dim = [dim_col, dim_row]
         arr.layout.data_offset = 0
-        arr.data = grid_2d.astype(np.float32).ravel(order='C').tolist()
+        arr.data = grid_2d.astype(np.float32).ravel(order="C").tolist()
         return arr
 
     # === 回调 ===
-    def cb(self, msg: TofsenseMFrame0):
-        # 读取并按 idx -> (r, c) 排列
+    def cb(self, msg: TofsenseMFrame0) -> None:
         N = min(len(msg.pixels), self.rows * self.cols)
 
-        # 1) 数据有效性 + 时间中值滤波
-        # main_depth：
-        # - depth_mode == 'z'：保存 Z（米）
-        # - depth_mode == 'los'：保存斜距 R（米）
         main_depth = np.full((self.rows, self.cols), np.nan, dtype=np.float32)
-        valid_vals = []  # 用于动态分辨率统计（Z 中位数）
+        valid_vals = []
 
         for idx in range(N):
-            p = msg.pixels[idx]
+            pixel = msg.pixels[idx]
             r = idx // self.cols
             c = idx % self.cols
 
-            if getattr(p, "dis_status", 0) == 0 and math.isfinite(p.dis):
-                d_m = float(p.dis) / 1000.0  # mm -> m
+            if getattr(pixel, "dis_status", 0) == 0 and math.isfinite(pixel.dis):
+                d_m = float(pixel.dis) / 1000.0  # mm -> m
                 if self.min_range <= d_m <= self.max_range:
-                    # 时间中值滤波
                     if self.use_temporal_median:
                         self.buffers[idx].append(d_m)
-                        d_use = float(np.median(self.buffers[idx])) if len(self.buffers[idx]) > 0 else d_m
+                        d_use = float(np.median(self.buffers[idx])) if self.buffers[idx] else d_m
                     else:
                         d_use = d_m
 
                     main_depth[r, c] = d_use
 
-                    # 用于动态分辨率：取 Z 值
                     if self.depth_mode == "z":
                         valid_vals.append(d_use)
-                    else:  # 'los'
+                    else:
                         valid_vals.append(d_use * self.dz_lut[r, c])
 
-        # 2) 高程图分辨率与覆盖尺寸（按 Z 中位数）
-        if self.resolution_mode == "dynamic" and len(valid_vals) > 0:
+        if self.resolution_mode == "dynamic" and valid_vals:
             D_z = float(np.median(valid_vals))
         else:
             D_z = float(self.nominal_distance)
@@ -255,39 +251,39 @@ class TofsenseMFusionNode:
         res_y = H / max(self.rows, 1)
         resolution = float((res_x + res_y) / 2.0)
 
-        # 3) 生成点云（PointXYZIRCAEDT）
         points = []
         for r in range(self.rows):
             for c in range(self.cols):
                 idx = r * self.cols + c
                 d = main_depth[r, c]
 
-                # 提取强度、回波类型、通道
                 if math.isfinite(d):
-                    I = self._extract_intensity(msg.pixels[idx])
-                    Rtype = int(getattr(msg.pixels[idx], "return_type", 0))
-                    Rtype = max(0, min(255, Rtype))  # UINT8
-                    Chan = int(idx)                  # UINT16: 用像素线性索引作为通道
-                    Chan = max(0, min(65535, Chan))
+                    intensity = self._extract_intensity(msg.pixels[idx])
+                    return_type = int(getattr(msg.pixels[idx], "return_type", 0))
+                    return_type = max(0, min(255, return_type))
+                    channel = max(0, min(65535, int(idx)))
                 else:
-                    I = 0
-                    Rtype = 0
-                    Chan = 0
+                    intensity = 0
+                    return_type = 0
+                    channel = 0
 
                 if not math.isfinite(d):
                     if self.drop_invalid:
                         continue
-                    else:
-                        # 无效点：浮点 NaN，整型 0
-                        points.append([
-                            float('nan'), float('nan'), float('nan'),
-                            0, 0, 0,
-                            float('nan'), float('nan'), float('nan'),
-                            0
-                        ])
-                        continue
+                    points.append([
+                        float("nan"),
+                        float("nan"),
+                        float("nan"),
+                        0,
+                        0,
+                        0,
+                        float("nan"),
+                        float("nan"),
+                        float("nan"),
+                        0,
+                    ])
+                    continue
 
-                # 坐标
                 if self.depth_mode == "z":
                     x = self.u_lut[r, c] * d
                     y = self.v_lut[r, c] * d
@@ -296,37 +292,38 @@ class TofsenseMFusionNode:
                     dir_xyz = self.dir_lut[r, c, :]
                     x, y, z = (dir_xyz * d).tolist()
 
-                # 衍生量
                 dist = self._hypot3(x, y, z)
-                az = math.atan2(y, x)
-                el = math.atan2(z, dist) if dist > 0.0 else 0.0
-                t_ns = 0  # 无逐点时间戳 -> 0
+                azimuth = math.atan2(y, x)
+                elevation = math.atan2(z, dist) if dist > 0.0 else 0.0
+                t_ns = 0
 
-                points.append([x, y, z, I, Rtype, Chan, az, el, dist, t_ns])
+                points.append([x, y, z, intensity, return_type, channel, azimuth, elevation, dist, t_ns])
 
         cloud = self._pc2_from_points(points)
         self.pub_cloud.publish(cloud)
 
-        # 4) 生成 GridMap（elevation = Z）
         if self.depth_mode == "z":
             z_grid = main_depth.astype(np.float32, copy=True)
         else:
-            # 将 LOS 转为 Z：Z = R * dz
             z_grid = (main_depth * self.dz_lut).astype(np.float32)
 
-        gm = GridMap()
-        gm.info = self._gridmap_info(resolution=resolution, len_x=W, len_y=H)
-        gm.layers = [self.layer_name]
-        gm.basic_layers = [self.layer_name]
-        gm.data = [self._pack_layer(z_grid)]
-        self.pub_grid.publish(gm)
+        grid_map = GridMap()
+        grid_map.info = self._gridmap_info(resolution=resolution, len_x=W, len_y=H)
+        grid_map.layers = [self.layer_name]
+        grid_map.basic_layers = [self.layer_name]
+        grid_map.data = [self._pack_layer(z_grid)]
+        self.pub_grid.publish(grid_map)
 
 
-def main():
-    rospy.init_node("tofsensem_fusion_node")
-    TofsenseMFusionNode()
-    rospy.loginfo("tofsensem_fusion_node started.")
-    rospy.spin()
+def main() -> None:
+    rclpy.init()
+    node = TofsenseMFusionNode()
+    node.get_logger().info("tofsensem_fusion_node started.")
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":

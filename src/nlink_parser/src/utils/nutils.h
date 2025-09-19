@@ -1,6 +1,8 @@
 #ifndef NUTILS_H
 #define NUTILS_H
 
-void TopicAdvertisedTip(const char *topic);
+#include <rclcpp/logger.hpp>
+
+void TopicAdvertisedTip(const rclcpp::Logger &logger, const char *topic);
 
 #endif // NUTILS_H
