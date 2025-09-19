@@ -1,11 +1,17 @@
 cmake_minimum_required(VERSION 3.8)
 project(serial)
 
+if(NOT DEFINED SERIAL_EXPORT_SET)
+  set(SERIAL_EXPORT_SET serial_export)
+endif()
+
 add_library(${PROJECT_NAME}
   src/serial.cc
   include/serial/serial.h
   include/serial/v8stdint.h
 )
+
+set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(serial_platform_SRCS)
 
@@ -48,6 +54,7 @@ else()
 endif()
 
 install(TARGETS ${PROJECT_NAME}
+  EXPORT ${SERIAL_EXPORT_SET}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin

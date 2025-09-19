@@ -85,7 +85,7 @@ class TofsenseMFusionNode(Node):
                 import debugpy  # type: ignore
 
                 debugpy.listen(("0.0.0.0", debug_port))
-                self.get_logger().info("Waiting for VS Code debugger on port %d...", debug_port)
+                self.get_logger().info(f"Waiting for VS Code debugger on port {debug_port}...")
                 debugpy.wait_for_client()
             except Exception as exc:  # pragma: no cover - optional debug
                 self.get_logger().warn(f"debugpy 初始化失败：{exc}")
@@ -106,14 +106,16 @@ class TofsenseMFusionNode(Node):
         self.sub = self.create_subscription(TofsenseMFrame0, self.topic_in, self.cb, 10)
 
         self.get_logger().info(
-            "tofsensem_fusion (depth_mode=%s): rows=%d cols=%d FOVx=%.1f FOVy=%.1f max_range=%.2f mode=%s",
-            self.depth_mode,
-            self.rows,
-            self.cols,
-            self.fov_x_deg,
-            self.fov_y_deg,
-            self.max_range,
-            self.resolution_mode,
+            "tofsensem_fusion (depth_mode=%s): rows=%d cols=%d FOVx=%.1f FOVy=%.1f max_range=%.2f mode=%s"
+            % (
+                self.depth_mode,
+                self.rows,
+                self.cols,
+                self.fov_x_deg,
+                self.fov_y_deg,
+                self.max_range,
+                self.resolution_mode,
+            )
         )
 
     # === LUT 构建（小孔模型） ===
@@ -177,29 +179,27 @@ class TofsenseMFusionNode(Node):
         header.frame_id = self.frame_id
 
         fields = [
-            PointField("x", 0, PointField.FLOAT32, 1),
-            PointField("y", 4, PointField.FLOAT32, 1),
-            PointField("z", 8, PointField.FLOAT32, 1),
-            PointField("intensity", 12, PointField.UINT8, 1),
-            PointField("return_type", 13, PointField.UINT8, 1),
-            PointField("channel", 14, PointField.UINT16, 1),
-            PointField("azimuth", 16, PointField.FLOAT32, 1),
-            PointField("elevation", 20, PointField.FLOAT32, 1),
-            PointField("distance", 24, PointField.FLOAT32, 1),
-            PointField("time_stamp", 28, PointField.UINT32, 1),
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="intensity", offset=12, datatype=PointField.UINT8, count=1),
+            PointField(name="return_type", offset=13, datatype=PointField.UINT8, count=1),
+            PointField(name="channel", offset=14, datatype=PointField.UINT16, count=1),
+            PointField(name="azimuth", offset=16, datatype=PointField.FLOAT32, count=1),
+            PointField(name="elevation", offset=20, datatype=PointField.FLOAT32, count=1),
+            PointField(name="distance", offset=24, datatype=PointField.FLOAT32, count=1),
+            PointField(name="time_stamp", offset=28, datatype=PointField.UINT32, count=1),
         ]
         return pc2.create_cloud(header, fields, points)
 
     def _gridmap_info(self, resolution, len_x, len_y):
         info = GridMapInfo()
-        info.header.frame_id = self.frame_id
-        info.header.stamp = self.get_clock().now().to_msg()
         info.resolution = float(resolution)
         info.length_x = float(len_x)
         info.length_y = float(len_y)
         pose = Pose()
-        pose.position = Point(0.0, 0.0, 0.0)
-        pose.orientation = Quaternion(0.0, 0.0, 0.0, 1.0)
+        pose.position = Point(x=0.0, y=0.0, z=0.0)
+        pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
         info.pose = pose
         return info
 
@@ -308,6 +308,8 @@ class TofsenseMFusionNode(Node):
             z_grid = (main_depth * self.dz_lut).astype(np.float32)
 
         grid_map = GridMap()
+        grid_map.header.stamp = self.get_clock().now().to_msg()
+        grid_map.header.frame_id = self.frame_id
         grid_map.info = self._gridmap_info(resolution=resolution, len_x=W, len_y=H)
         grid_map.layers = [self.layer_name]
         grid_map.basic_layers = [self.layer_name]

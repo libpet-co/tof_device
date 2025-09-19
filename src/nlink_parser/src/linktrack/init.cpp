@@ -255,6 +255,13 @@ void Init::initNodeFrame2(NProtocolExtracter *protocol_extraction) {
     msg_data.local_time = data.local_time;
     msg_data.system_time = data.system_time;
     msg_data.voltage = data.voltage;
+    ARRAY_ASSIGN(msg_data.pos_3d, data.pos_3d);
+    ARRAY_ASSIGN(msg_data.eop_3d, data.eop_3d);
+    ARRAY_ASSIGN(msg_data.vel_3d, data.vel_3d);
+    ARRAY_ASSIGN(msg_data.angle_3d, data.angle_3d);
+    ARRAY_ASSIGN(msg_data.quaternion, data.quaternion);
+    ARRAY_ASSIGN(msg_data.imu_gyro_3d, data.imu_gyro_3d);
+    ARRAY_ASSIGN(msg_data.imu_acc_3d, data.imu_acc_3d);
 
     msg_nodes.resize(data.valid_node_count);
     for (size_t i = 0; i < data.valid_node_count; ++i) {
@@ -262,8 +269,9 @@ void Init::initNodeFrame2(NProtocolExtracter *protocol_extraction) {
       auto node_data = data.nodes[i];
       msg_node.id = node_data->id;
       msg_node.role = node_data->role;
-      ARRAY_ASSIGN(msg_node.pos_3d, node_data->pos_3d);
-      ARRAY_ASSIGN(msg_node.quaternion, node_data->quaternion);
+      msg_node.dis = node_data->dis;
+      msg_node.fp_rssi = node_data->fp_rssi;
+      msg_node.rx_rssi = node_data->rx_rssi;
     }
 
     auto publisher = std::static_pointer_cast<rclcpp::Publisher<LinktrackNodeframe2>>(
@@ -303,8 +311,9 @@ void Init::initNodeFrame3(NProtocolExtracter *protocol_extraction) {
       auto node_data = data.nodes[i];
       msg_node.id = node_data->id;
       msg_node.role = node_data->role;
-      ARRAY_ASSIGN(msg_node.pos_3d, node_data->pos_3d);
       msg_node.dis = node_data->dis;
+      msg_node.fp_rssi = node_data->fp_rssi;
+      msg_node.rx_rssi = node_data->rx_rssi;
     }
 
     auto publisher = std::static_pointer_cast<rclcpp::Publisher<LinktrackNodeframe3>>(
@@ -330,21 +339,35 @@ void Init::initNodeFrame4(NProtocolExtracter *protocol_extraction) {
     }
     const auto &data = g_nlt_nodeframe4.result;
     auto &msg_data = g_msg_nodeframe4;
-    auto &msg_nodes = msg_data.nodes;
+    auto &msg_tags = msg_data.tags;
 
     msg_data.role = data.role;
     msg_data.id = data.id;
+    msg_data.local_time = data.local_time;
     msg_data.system_time = data.system_time;
     msg_data.voltage = data.voltage;
 
-    msg_nodes.resize(data.valid_node_count);
-    for (size_t i = 0; i < data.valid_node_count; ++i) {
-      auto &msg_node = msg_nodes[i];
-      auto node_data = data.nodes[i];
-      msg_node.id = node_data->id;
-      msg_node.role = node_data->role;
-      msg_node.dis = node_data->dis;
-      ARRAY_ASSIGN(msg_node.eop_3d, node_data->eop_3d);
+    msg_tags.resize(data.tag_count);
+    for (size_t i = 0; i < data.tag_count; ++i) {
+      auto &msg_tag = msg_tags[i];
+      auto tag_data = data.tags[i];
+      if (!tag_data) {
+        continue;
+      }
+      msg_tag.id = tag_data->id;
+      msg_tag.voltage = tag_data->voltage;
+
+      auto &msg_anchors = msg_tag.anchors;
+      msg_anchors.resize(tag_data->anchor_count);
+      for (size_t j = 0; j < tag_data->anchor_count; ++j) {
+        auto anchor_data = tag_data->anchors[j];
+        if (!anchor_data) {
+          continue;
+        }
+        auto &msg_anchor = msg_anchors[j];
+        msg_anchor.id = anchor_data->id;
+        msg_anchor.dis = anchor_data->dis;
+      }
     }
 
     auto publisher = std::static_pointer_cast<rclcpp::Publisher<LinktrackNodeframe4>>(
@@ -416,22 +439,17 @@ void Init::initNodeFrame6(NProtocolExtracter *protocol_extraction) {
 
     msg_data.role = data.role;
     msg_data.id = data.id;
-    msg_data.local_time = data.local_time;
-    msg_data.system_time = data.system_time;
-    msg_data.voltage = data.voltage;
 
     msg_nodes.resize(data.valid_node_count);
     for (size_t i = 0; i < data.valid_node_count; ++i) {
       auto &msg_node = msg_nodes[i];
       auto node_data = data.nodes[i];
+      if (!node_data) {
+        continue;
+      }
       msg_node.id = node_data->id;
       msg_node.role = node_data->role;
-      ARRAY_ASSIGN(msg_node.pos_3d, node_data->pos_3d);
-      ARRAY_ASSIGN(msg_node.quaternion, node_data->quaternion);
-      ARRAY_ASSIGN(msg_node.vel_3d, node_data->vel_3d);
-      ARRAY_ASSIGN(msg_node.acc_3d, node_data->acc_3d);
-      ARRAY_ASSIGN(msg_node.imu_gyro_3d, node_data->imu_gyro_3d);
-      ARRAY_ASSIGN(msg_node.imu_acc_3d, node_data->imu_acc_3d);
+      msg_node.data.assign(node_data->data, node_data->data + node_data->data_length);
     }
 
     auto publisher = std::static_pointer_cast<rclcpp::Publisher<LinktrackNodeframe6>>(

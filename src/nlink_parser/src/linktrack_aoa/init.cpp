@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 #include "../linktrack/protocols.h"
 #include "nlink_parser/msg/linktrack_aoa_nodeframe0.hpp"
@@ -11,6 +12,21 @@
 #include "nlink_unpack/nlink_linktrack_nodeframe0.h"
 #include "nutils.h"
 #include "std_msgs/msg/string.hpp"
+
+namespace {
+class NLTAoa_ProtocolNodeFrame0 : public NLinkProtocolVLength {
+public:
+  NLTAoa_ProtocolNodeFrame0()
+      : NLinkProtocolVLength(
+            true, g_nltaoa_nodeframe0.fixed_part_size,
+            {g_nltaoa_nodeframe0.frame_header, g_nltaoa_nodeframe0.function_mark}) {}
+
+protected:
+  void UnpackFrameData(const uint8_t *data) override {
+    g_nltaoa_nodeframe0.UnpackData(data, length());
+  }
+};
+} // namespace
 
 namespace linktrack_aoa {
 
@@ -55,7 +71,7 @@ void Init::initNodeFrame0(NProtocolExtracter *protocol_extraction) {
       return;
     }
     if (!publishers_[protocol]) {
-      const auto topic = "nlink_linktrack_nodeframe0";
+      const std::string topic = "nlink_linktrack_nodeframe0";
       publishers_[protocol] = node->create_publisher<LinktrackNodeframe0>(
           topic, rclcpp::QoS(rclcpp::KeepLast(200)));
       TopicAdvertisedTip(node->get_logger(), topic.c_str());
@@ -96,7 +112,7 @@ void Init::InitAoaNodeFrame0(NProtocolExtracter *protocol_extraction) {
       return;
     }
     if (!publishers_[protocol]) {
-      const auto topic = "nlink_linktrack_aoa_nodeframe0";
+      const std::string topic = "nlink_linktrack_aoa_nodeframe0";
       publishers_[protocol] = node->create_publisher<LinktrackAoaNodeframe0>(
           topic, rclcpp::QoS(rclcpp::KeepLast(200)));
       TopicAdvertisedTip(node->get_logger(), topic.c_str());

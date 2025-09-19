@@ -44,7 +44,7 @@ void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
       return;
     }
     if (!publishers_[protocol]) {
-      const auto topic = "nlink_tofsensem_frame0";
+      const std::string topic = "nlink_tofsensem_frame0";
       publishers_[protocol] = node->create_publisher<TofsenseMFrame0>(
           topic, rclcpp::QoS(rclcpp::KeepLast(50)));
       TopicAdvertisedTip(node->get_logger(), topic.c_str());
