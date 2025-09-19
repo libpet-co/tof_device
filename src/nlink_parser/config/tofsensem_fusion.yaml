@@ -1,0 +1,26 @@
+# 坐标/话题
+frame_id: "tofsensem_optical_frame"
+topic_in: "/nlink_tofsensem_frame0"
+topic_pointcloud: "/tofsensem/points"
+topic_gridmap: "/tofsensem/grid_map"
+
+# 传感器阵列
+rows: 8
+cols: 8
+
+# 视场角（度）
+fov_x_deg: 45.0
+fov_y_deg: 45.0
+
+# 数据有效性与滤波
+min_range: 0.02     # m
+max_range: 2000.0      # m （仅 2m 以内有效）
+drop_invalid: true
+use_temporal_median: false
+filter_window: 3    # 时间中值滤波窗口大小（帧数）
+
+# 高程图
+layer_name: "elevation"
+latch_grid: true
+resolution_mode: "fixed"      # "fixed" or "dynamic"
+nominal_distance: 2.0         # fixed 模式下用于计算分辨率的名义距离（m）
