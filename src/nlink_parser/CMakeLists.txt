@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.8)
 project(nlink_parser)
 
+# Ensure ccache is disabled for this project so builds do not rely on the
+# user-level ccache configuration.
+set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "env CCACHE_DISABLE=1")
+set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "env CCACHE_DISABLE=1")
+
+# Touch CATKIN_INSTALL_INTO_PREFIX_ROOT if colcon sets it to avoid unused
+# variable warnings during configure.
+if(DEFINED CATKIN_INSTALL_INTO_PREFIX_ROOT)
+  set(_catkin_install_into_prefix_root "${CATKIN_INSTALL_INTO_PREFIX_ROOT}")
+endif()
+
 set(_export_set export_${PROJECT_NAME})
 set(SERIAL_EXPORT_SET ${_export_set})
 
@@ -28,6 +39,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
   DEPENDENCIES std_msgs
 )
+
+rosidl_get_typesupport_target(rosidl_typesupport_cpp_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 set(nutils nutils)
 add_library(${nutils}
@@ -66,13 +79,11 @@ ament_target_dependencies(${nutils}
 
 target_link_libraries(${nutils}
   serial
+  ${rosidl_typesupport_cpp_target}
 )
 
 set_property(TARGET ${nutils} APPEND PROPERTY INTERFACE_LINK_LIBRARIES serial)
-
-rosidl_target_interfaces(${nutils}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
+set_property(TARGET ${nutils} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${rosidl_typesupport_cpp_target})
 
 set(linktrack_executable linktrack)
 add_executable(${linktrack_executable}
@@ -90,9 +101,6 @@ ament_target_dependencies(${linktrack_executable}
   std_msgs
 )
 
-rosidl_target_interfaces(${linktrack_executable}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
 
 set(linktrack_rviz_executable linktrack_rviz_converter)
 add_executable(${linktrack_rviz_executable}
@@ -109,9 +117,6 @@ ament_target_dependencies(${linktrack_rviz_executable}
   nav_msgs
 )
 
-rosidl_target_interfaces(${linktrack_rviz_executable}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
 
 set(tofsense_executable tofsense)
 add_executable(${tofsense_executable}
@@ -128,9 +133,6 @@ ament_target_dependencies(${tofsense_executable}
   std_msgs
 )
 
-rosidl_target_interfaces(${tofsense_executable}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
 
 set(tofsensem_executable tofsensem)
 add_executable(${tofsensem_executable}
@@ -147,9 +149,6 @@ ament_target_dependencies(${tofsensem_executable}
   std_msgs
 )
 
-rosidl_target_interfaces(${tofsensem_executable}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
 
 set(linktrack_aoa_executable linktrack_aoa)
 add_executable(${linktrack_aoa_executable}
@@ -167,9 +166,6 @@ ament_target_dependencies(${linktrack_aoa_executable}
   std_msgs
 )
 
-rosidl_target_interfaces(${linktrack_aoa_executable}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
 
 set(iot_executable iot)
 add_executable(${iot_executable}
@@ -186,9 +182,6 @@ ament_target_dependencies(${iot_executable}
   std_msgs
 )
 
-rosidl_target_interfaces(${iot_executable}
-  ${PROJECT_NAME} "rosidl_typesupport_cpp"
-)
 
 install(TARGETS
   ${nutils}

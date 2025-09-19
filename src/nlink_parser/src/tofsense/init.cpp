@@ -52,7 +52,7 @@ Init::Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_ext
 void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
   static auto protocol_frame0_ = new NTS_ProtocolFrame0;
   protocol_extraction->AddProtocol(protocol_frame0_);
-  protocol_frame0_->SetHandleDataCallback([this, protocol_frame0_] {
+  protocol_frame0_->SetHandleDataCallback([this] {
     auto node = node_.lock();
     if (!node) {
       return;
@@ -100,7 +100,7 @@ void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
     }
     timer_scan_ = node->create_wall_timer(
         std::chrono::duration<double>(1.0 / frequency_),
-        [this, protocol_frame0_]() {
+        [this]() {
           frame0_map_.clear();
           node_index_ = 0;
           timer_read_active_ = true;
@@ -110,7 +110,7 @@ void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
         });
     timer_read_ = node->create_wall_timer(
         std::chrono::milliseconds(6),
-        [this, protocol_frame0_]() {
+        [this]() {
           if (!timer_read_active_) {
             return;
           }

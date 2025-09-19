@@ -38,7 +38,7 @@ Init::Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_ext
 void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
   static auto protocol = new ProtocolFrame0;
   protocol_extraction->AddProtocol(protocol);
-  protocol->SetHandleDataCallback([this, protocol] {
+  protocol->SetHandleDataCallback([this] {
     auto node = node_.lock();
     if (!node) {
       return;

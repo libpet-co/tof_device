@@ -14,8 +14,8 @@ void initSerial(const rclcpp::Node::SharedPtr &node, serial::Serial *serial) {
 
     serial->setPort(port_name);
     serial->setBaudrate(static_cast<uint32_t>(baud_rate));
-    RCLCPP_INFO(node->get_logger(), "try to open serial port with %s,%d",
-                port_name.c_str(), baud_rate);
+    RCLCPP_INFO(node->get_logger(), "try to open serial port with %s,%ld",
+                port_name.c_str(), static_cast<long>(baud_rate));
     auto timeout = serial::Timeout::simpleTimeout(10);
     serial->setTimeout(timeout);
     serial->open();
