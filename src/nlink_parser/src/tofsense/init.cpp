@@ -1,44 +1,50 @@
-
 #include "init.h"
+
+#include <chrono>
 
 #include "nlink_protocol.h"
 #include "nlink_unpack/nlink_tofsense_frame0.h"
 #include "nlink_unpack/nlink_utils.h"
 #include "nutils.h"
 
+namespace {
 class NTS_ProtocolFrame0 : public NLinkProtocol {
 public:
-  NTS_ProtocolFrame0();
+  NTS_ProtocolFrame0()
+      : NLinkProtocol(true, g_nts_frame0.fixed_part_size,
+                      {g_nts_frame0.frame_header, g_nts_frame0.function_mark}) {}
 
 protected:
-  void UnpackFrameData(const uint8_t *data) override;
+  void UnpackFrameData(const uint8_t *data) override {
+    g_nts_frame0.UnpackData(data, length());
+  }
 };
 
-NTS_ProtocolFrame0::NTS_ProtocolFrame0()
-    : NLinkProtocol(true, g_nts_frame0.fixed_part_size,
-                    {g_nts_frame0.frame_header, g_nts_frame0.function_mark}) {}
-
-void NTS_ProtocolFrame0::UnpackFrameData(const uint8_t *data) {
-  g_nts_frame0.UnpackData(data, length());
-}
-
-namespace tofsense {
-nlink_parser::TofsenseFrame0 g_msg_frame0;
-
 #pragma pack(push, 1)
-struct {
+struct CommandRead {
   char header[2]{0x57, 0x10};
   uint8_t reserved0[2]{0xff, 0xff};
   uint8_t id{};
   uint8_t reserved1[2]{0xff, 0xff};
   uint8_t checkSum{};
-} g_command_read;
+};
 #pragma pack(pop)
+} // namespace
 
-Init::Init(NProtocolExtracter *protocol_extraction, serial::Serial *serial)
-    : serial_(serial) {
-  is_inquire_mode_ =
-      serial_ ? ros::param::param<bool>("~inquire_mode", true) : false;
+namespace tofsense {
+using nlink_parser::msg::TofsenseCascade;
+using nlink_parser::msg::TofsenseFrame0;
+
+TofsenseFrame0 g_msg_frame0;
+
+Init::Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_extraction,
+           serial::Serial *serial)
+    : serial_(serial), node_(node) {
+  if (serial_) {
+    is_inquire_mode_ = node->declare_parameter<bool>("inquire_mode", true);
+  } else {
+    is_inquire_mode_ = false;
+  }
 
   InitFrame0(protocol_extraction);
 }
@@ -46,20 +52,23 @@ Init::Init(NProtocolExtracter *protocol_extraction, serial::Serial *serial)
 void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
   static auto protocol_frame0_ = new NTS_ProtocolFrame0;
   protocol_extraction->AddProtocol(protocol_frame0_);
-  protocol_frame0_->SetHandleDataCallback([=] {
+  protocol_frame0_->SetHandleDataCallback([this, protocol_frame0_] {
+    auto node = node_.lock();
+    if (!node) {
+      return;
+    }
     if (!publishers_[protocol_frame0_]) {
-      ros::NodeHandle nh_;
+      std::string topic;
       if (is_inquire_mode_) {
-        auto topic = "nlink_tofsense_cascade";
-        publishers_[protocol_frame0_] =
-            nh_.advertise<nlink_parser::TofsenseCascade>(topic, 50);
-        TopicAdvertisedTip(topic);
+        topic = "nlink_tofsense_cascade";
+        publishers_[protocol_frame0_] = node->create_publisher<TofsenseCascade>(
+            topic, rclcpp::QoS(rclcpp::KeepLast(50)));
       } else {
-        auto topic = "nlink_tofsense_frame0";
-        publishers_[protocol_frame0_] =
-            nh_.advertise<nlink_parser::TofsenseFrame0>(topic, 50);
-        TopicAdvertisedTip(topic);
+        topic = "nlink_tofsense_frame0";
+        publishers_[protocol_frame0_] = node->create_publisher<TofsenseFrame0>(
+            topic, rclcpp::QoS(rclcpp::KeepLast(50)));
       }
+      TopicAdvertisedTip(node->get_logger(), topic.c_str());
     }
 
     const auto &data = g_nts_frame0.result;
@@ -74,40 +83,67 @@ void Init::InitFrame0(NProtocolExtracter *protocol_extraction) {
     if (is_inquire_mode_) {
       frame0_map_[data.id] = g_msg_frame0;
     } else {
-      publishers_.at(protocol_frame0_).publish(g_msg_frame0);
+      auto iter = publishers_.find(protocol_frame0_);
+      if (iter != publishers_.end()) {
+        auto publisher = std::static_pointer_cast<rclcpp::Publisher<TofsenseFrame0>>(iter->second);
+        if (publisher) {
+          publisher->publish(g_msg_frame0);
+        }
+      }
     }
   });
 
-  if (is_inquire_mode_) {
-    timer_scan_ = nh_.createTimer(
-        ros::Duration(1.0 / frequency_),
-        [=](const ros::TimerEvent &) {
+  if (is_inquire_mode_ && serial_) {
+    auto node = node_.lock();
+    if (!node) {
+      return;
+    }
+    timer_scan_ = node->create_wall_timer(
+        std::chrono::duration<double>(1.0 / frequency_),
+        [this, protocol_frame0_]() {
           frame0_map_.clear();
           node_index_ = 0;
-          timer_read_.start();
-        },
-        false, true);
-    timer_read_ = nh_.createTimer(
-        ros::Duration(0.006),
-        [=](const ros::TimerEvent &) {
+          timer_read_active_ = true;
+          if (timer_read_) {
+            timer_read_->reset();
+          }
+        });
+    timer_read_ = node->create_wall_timer(
+        std::chrono::milliseconds(6),
+        [this, protocol_frame0_]() {
+          if (!timer_read_active_) {
+            return;
+          }
           if (node_index_ >= 8) {
             if (!frame0_map_.empty()) {
-              nlink_parser::TofsenseCascade msg_cascade;
+              TofsenseCascade msg_cascade;
               for (const auto &msg : frame0_map_) {
                 msg_cascade.nodes.push_back(msg.second);
               }
-              publishers_.at(protocol_frame0_).publish(msg_cascade);
+              auto iter = publishers_.find(protocol_frame0_);
+              if (iter != publishers_.end()) {
+                auto publisher = std::static_pointer_cast<rclcpp::Publisher<TofsenseCascade>>(iter->second);
+                if (publisher) {
+                  publisher->publish(msg_cascade);
+                }
+              }
             }
-            timer_read_.stop();
+            timer_read_active_ = false;
+            if (timer_read_) {
+              timer_read_->cancel();
+            }
           } else {
-            g_command_read.id = node_index_;
-            auto data = reinterpret_cast<uint8_t *>(&g_command_read);
-            NLink_UpdateCheckSum(data, sizeof(g_command_read));
-            serial_->write(data, sizeof(g_command_read));
+            CommandRead command{};
+            command.id = node_index_;
+            auto data = reinterpret_cast<uint8_t *>(&command);
+            NLink_UpdateCheckSum(data, sizeof(CommandRead));
+            if (serial_) {
+              serial_->write(data, sizeof(CommandRead));
+            }
             ++node_index_;
           }
-        },
-        false, false);
+        });
+    timer_read_->cancel();
   }
 }
 

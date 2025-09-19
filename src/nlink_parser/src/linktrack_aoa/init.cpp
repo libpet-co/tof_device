@@ -1,63 +1,64 @@
 #include "init.h"
 
-#include <std_msgs/String.h>
+#include <cstring>
+#include <stdexcept>
 
 #include "../linktrack/protocols.h"
+#include "nlink_parser/msg/linktrack_aoa_nodeframe0.hpp"
+#include "nlink_parser/msg/linktrack_nodeframe0.hpp"
 #include "nlink_protocol.h"
 #include "nlink_unpack/nlink_linktrack_aoa_nodeframe0.h"
 #include "nlink_unpack/nlink_linktrack_nodeframe0.h"
 #include "nutils.h"
-
-class NLTAoa_ProtocolNodeFrame0 : public NLinkProtocolVLength {
-public:
-  NLTAoa_ProtocolNodeFrame0();
-
-protected:
-  void UnpackFrameData(const uint8_t *data) override;
-};
-
-NLTAoa_ProtocolNodeFrame0::NLTAoa_ProtocolNodeFrame0()
-    : NLinkProtocolVLength(true, g_nltaoa_nodeframe0.fixed_part_size,
-                           {g_nltaoa_nodeframe0.frame_header,
-                            g_nltaoa_nodeframe0.function_mark}) {}
-
-void NLTAoa_ProtocolNodeFrame0::UnpackFrameData(const uint8_t *data) {
-  g_nltaoa_nodeframe0.UnpackData(data, length());
-}
+#include "std_msgs/msg/string.hpp"
 
 namespace linktrack_aoa {
-nlink_parser::LinktrackNodeframe0 g_msg_nodeframe0;
-nlink_parser::LinktrackAoaNodeframe0 g_msg_aoa_nodeframe0;
 
-static serial::Serial *g_serial;
+using nlink_parser::msg::LinktrackAoaNodeframe0;
+using nlink_parser::msg::LinktrackNodeframe0;
+using std_msgs::msg::String;
 
-Init::Init(NProtocolExtracter *protocol_extraction, serial::Serial *serial) {
-  g_serial = serial;
+LinktrackNodeframe0 g_msg_nodeframe0;
+LinktrackAoaNodeframe0 g_msg_aoa_nodeframe0;
+
+Init::Init(const rclcpp::Node::SharedPtr &node, NProtocolExtracter *protocol_extraction,
+           serial::Serial *serial)
+    : node_(node), serial_(serial) {
   initDataTransmission();
   initNodeFrame0(protocol_extraction);
   InitAoaNodeFrame0(protocol_extraction);
 }
 
-static void DTCallback(const std_msgs::String::ConstPtr &msg) {
-  if (g_serial)
-    g_serial->write(msg->data);
-}
-
 void Init::initDataTransmission() {
-  dt_sub_ =
-      nh_.subscribe("nlink_linktrack_data_transmission", 1000, DTCallback);
+  if (!serial_) {
+    return;
+  }
+  auto node = node_.lock();
+  if (!node) {
+    throw std::runtime_error("Node expired before setting up data transmission");
+  }
+  dt_sub_ = node->create_subscription<String>(
+      "nlink_linktrack_data_transmission", rclcpp::QoS(1000),
+      [this](const String::SharedPtr msg) {
+        if (serial_) {
+          serial_->write(msg->data);
+        }
+      });
 }
 
 void Init::initNodeFrame0(NProtocolExtracter *protocol_extraction) {
   auto protocol = new NLT_ProtocolNodeFrame0;
   protocol_extraction->AddProtocol(protocol);
-  protocol->SetHandleDataCallback([=] {
+  protocol->SetHandleDataCallback([this, protocol] {
+    auto node = node_.lock();
+    if (!node) {
+      return;
+    }
     if (!publishers_[protocol]) {
-      auto topic = "nlink_linktrack_nodeframe0";
-      publishers_[protocol] =
-          nh_.advertise<nlink_parser::LinktrackNodeframe0>(topic, 200);
-      TopicAdvertisedTip(topic);
-      ;
+      const auto topic = "nlink_linktrack_nodeframe0";
+      publishers_[protocol] = node->create_publisher<LinktrackNodeframe0>(
+          topic, rclcpp::QoS(rclcpp::KeepLast(200)));
+      TopicAdvertisedTip(node->get_logger(), topic.c_str());
     }
     const auto &data = g_nlt_nodeframe0.result;
     auto &msg_data = g_msg_nodeframe0;
@@ -69,26 +70,36 @@ void Init::initNodeFrame0(NProtocolExtracter *protocol_extraction) {
     msg_nodes.resize(data.valid_node_count);
     for (size_t i = 0; i < data.valid_node_count; ++i) {
       auto &msg_node = msg_nodes[i];
-      auto node = data.nodes[i];
-      msg_node.id = node->id;
-      msg_node.role = node->role;
-      msg_node.data.resize(node->data_length);
-      memcpy(msg_node.data.data(), node->data, node->data_length);
+      auto node_data = data.nodes[i];
+      msg_node.id = node_data->id;
+      msg_node.role = node_data->role;
+      msg_node.data.resize(node_data->data_length);
+      std::memcpy(msg_node.data.data(), node_data->data, node_data->data_length);
     }
 
-    publishers_.at(protocol).publish(msg_data);
+    auto iter = publishers_.find(protocol);
+    if (iter != publishers_.end()) {
+      auto publisher = std::static_pointer_cast<rclcpp::Publisher<LinktrackNodeframe0>>(iter->second);
+      if (publisher) {
+        publisher->publish(msg_data);
+      }
+    }
   });
 }
 
 void Init::InitAoaNodeFrame0(NProtocolExtracter *protocol_extraction) {
   auto protocol = new NLTAoa_ProtocolNodeFrame0;
   protocol_extraction->AddProtocol(protocol);
-  protocol->SetHandleDataCallback([=] {
+  protocol->SetHandleDataCallback([this, protocol] {
+    auto node = node_.lock();
+    if (!node) {
+      return;
+    }
     if (!publishers_[protocol]) {
-      auto topic = "nlink_linktrack_aoa_nodeframe0";
-      publishers_[protocol] =
-          nh_.advertise<nlink_parser::LinktrackAoaNodeframe0>(topic, 200);
-      TopicAdvertisedTip(topic);
+      const auto topic = "nlink_linktrack_aoa_nodeframe0";
+      publishers_[protocol] = node->create_publisher<LinktrackAoaNodeframe0>(
+          topic, rclcpp::QoS(rclcpp::KeepLast(200)));
+      TopicAdvertisedTip(node->get_logger(), topic.c_str());
     }
     const auto &data = g_nltaoa_nodeframe0.result;
     auto &msg_data = g_msg_aoa_nodeframe0;
@@ -103,16 +114,22 @@ void Init::InitAoaNodeFrame0(NProtocolExtracter *protocol_extraction) {
     msg_nodes.resize(data.valid_node_count);
     for (size_t i = 0; i < data.valid_node_count; ++i) {
       auto &msg_node = msg_nodes[i];
-      auto node = data.nodes[i];
-      msg_node.id = node->id;
-      msg_node.role = node->role;
-      msg_node.dis = node->dis;
-      msg_node.angle = node->angle;
-      msg_node.fp_rssi = node->fp_rssi;
-      msg_node.rx_rssi = node->rx_rssi;
+      auto node_data = data.nodes[i];
+      msg_node.id = node_data->id;
+      msg_node.role = node_data->role;
+      msg_node.dis = node_data->dis;
+      msg_node.angle = node_data->angle;
+      msg_node.fp_rssi = node_data->fp_rssi;
+      msg_node.rx_rssi = node_data->rx_rssi;
     }
 
-    publishers_.at(protocol).publish(msg_data);
+    auto iter = publishers_.find(protocol);
+    if (iter != publishers_.end()) {
+      auto publisher = std::static_pointer_cast<rclcpp::Publisher<LinktrackAoaNodeframe0>>(iter->second);
+      if (publisher) {
+        publisher->publish(msg_data);
+      }
+    }
   });
 }
 

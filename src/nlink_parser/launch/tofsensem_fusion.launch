@@ -1,8 +1,0 @@
-<launch>
-    <node pkg="nlink_parser" type="tofsensem_fusion_node.py" name="tofsensem_fusion" output="screen">
-    <param name="debug" value="false"/>
-    <param name="debug_port" value="5678"/>
-    <rosparam command="load" file="$(find nlink_parser)/config/tofsensem_fusion.yaml"/>
-    <!-- 其他参数... -->
-    </node>
-</launch>
