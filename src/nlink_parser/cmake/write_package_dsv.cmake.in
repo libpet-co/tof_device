@@ -1,0 +1,19 @@
+set(_pkg_dsv "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/@PROJECT_NAME@/package.dsv")
+if(EXISTS "${_pkg_dsv}")
+  file(READ "${_pkg_dsv}" _existing_pkg_dsv)
+else()
+  set(_existing_pkg_dsv "")
+endif()
+
+message(STATUS "[@PROJECT_NAME@] package.dsv before patch:\n${_existing_pkg_dsv}")
+
+set(_local_entries "source;share/@PROJECT_NAME@/local_setup.bash\n"
+                    "source;share/@PROJECT_NAME@/local_setup.dsv\n"
+                    "source;share/@PROJECT_NAME@/local_setup.sh\n"
+                    "source;share/@PROJECT_NAME@/local_setup.zsh\n")
+
+if(NOT _existing_pkg_dsv MATCHES "local_setup.bash")
+  string(CONCAT _new_pkg_dsv ${_local_entries} "${_existing_pkg_dsv}")
+  file(WRITE "${_pkg_dsv}" "${_new_pkg_dsv}")
+  message(STATUS "[@PROJECT_NAME@] prepended local_setup entries to package.dsv")
+endif()

@@ -19,7 +19,6 @@ TofsenseM 融合节点（Z 深度版，PointXYZIRCAEDT 输出）
   time_stamp (UINT32)  offset=28   = 相对 header 时刻的纳秒偏移（无逐点时间戳则置 0）
 point_step = 32
 """
-
 import math
 from collections import deque
 from typing import List

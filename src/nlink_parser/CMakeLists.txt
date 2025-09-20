@@ -1,13 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
 project(nlink_parser)
 
-# Ensure ccache is disabled for this project so builds do not rely on the
-# user-level ccache configuration.
+# 禁用 ccache，避免受用户级配置影响
 set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "env CCACHE_DISABLE=1")
 set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "env CCACHE_DISABLE=1")
 
-# Touch CATKIN_INSTALL_INTO_PREFIX_ROOT if colcon sets it to avoid unused
-# variable warnings during configure.
+# 若 colcon 设置了 CATKIN_INSTALL_INTO_PREFIX_ROOT，则触摸一下以避免未使用变量告警
 if(DEFINED CATKIN_INSTALL_INTO_PREFIX_ROOT)
   set(_catkin_install_into_prefix_root "${CATKIN_INSTALL_INTO_PREFIX_ROOT}")
 endif()
@@ -26,13 +24,12 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
-ament_environment_hooks(
-  ${CMAKE_CURRENT_SOURCE_DIR}/env_hooks/ament_prefix_path.dsv
-  ${CMAKE_CURRENT_SOURCE_DIR}/env_hooks/ament_prefix_path.bash
-)
+# ⚠️ 移除自定义 ament_prefix_path env hooks，交由 ament 默认机制处理
+# （这正是导致 AMENT_PREFIX_PATH 仅有 /opt/ros/humble 的原因）
 
 add_subdirectory(extern/serial)
 
+# 消息接口
 file(GLOB msg_files RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "msg/*.msg")
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -42,6 +39,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 rosidl_get_typesupport_target(rosidl_typesupport_cpp_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
+# 通用工具库
 set(nutils nutils)
 add_library(${nutils}
   src/utils/protocol_extracter/nprotocol_base.cpp
@@ -82,107 +80,66 @@ target_link_libraries(${nutils}
   ${rosidl_typesupport_cpp_target}
 )
 
+# 让依赖此库的包也能自动拿到链接项
 set_property(TARGET ${nutils} APPEND PROPERTY INTERFACE_LINK_LIBRARIES serial)
 set_property(TARGET ${nutils} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${rosidl_typesupport_cpp_target})
 
+# 可执行文件：linktrack
 set(linktrack_executable linktrack)
 add_executable(${linktrack_executable}
   src/linktrack/init.cpp
   src/linktrack/main.cpp
   src/linktrack/protocols.cpp
 )
+target_link_libraries(${linktrack_executable} ${nutils})
+ament_target_dependencies(${linktrack_executable} rclcpp std_msgs)
 
-target_link_libraries(${linktrack_executable}
-  ${nutils}
-)
-
-ament_target_dependencies(${linktrack_executable}
-  rclcpp
-  std_msgs
-)
-
-
+# 可执行文件：linktrack_rviz_converter
 set(linktrack_rviz_executable linktrack_rviz_converter)
 add_executable(${linktrack_rviz_executable}
   src/linktrack/main_rviz_converter.cpp
 )
+target_link_libraries(${linktrack_rviz_executable} ${nutils})
+ament_target_dependencies(${linktrack_rviz_executable} rclcpp geometry_msgs nav_msgs)
 
-target_link_libraries(${linktrack_rviz_executable}
-  ${nutils}
-)
-
-ament_target_dependencies(${linktrack_rviz_executable}
-  rclcpp
-  geometry_msgs
-  nav_msgs
-)
-
-
+# 可执行文件：tofsense
 set(tofsense_executable tofsense)
 add_executable(${tofsense_executable}
   src/tofsense/init.cpp
   src/tofsense/main.cpp
 )
+target_link_libraries(${tofsense_executable} ${nutils})
+ament_target_dependencies(${tofsense_executable} rclcpp std_msgs)
 
-target_link_libraries(${tofsense_executable}
-  ${nutils}
-)
-
-ament_target_dependencies(${tofsense_executable}
-  rclcpp
-  std_msgs
-)
-
-
+# 可执行文件：tofsensem
 set(tofsensem_executable tofsensem)
 add_executable(${tofsensem_executable}
   src/tofsensem/init.cpp
   src/tofsensem/main.cpp
 )
+target_link_libraries(${tofsensem_executable} ${nutils})
+ament_target_dependencies(${tofsensem_executable} rclcpp std_msgs)
 
-target_link_libraries(${tofsensem_executable}
-  ${nutils}
-)
-
-ament_target_dependencies(${tofsensem_executable}
-  rclcpp
-  std_msgs
-)
-
-
+# 可执行文件：linktrack_aoa
 set(linktrack_aoa_executable linktrack_aoa)
 add_executable(${linktrack_aoa_executable}
   src/linktrack_aoa/init.cpp
   src/linktrack_aoa/main.cpp
   src/linktrack/protocols.cpp
 )
+target_link_libraries(${linktrack_aoa_executable} ${nutils})
+ament_target_dependencies(${linktrack_aoa_executable} rclcpp std_msgs)
 
-target_link_libraries(${linktrack_aoa_executable}
-  ${nutils}
-)
-
-ament_target_dependencies(${linktrack_aoa_executable}
-  rclcpp
-  std_msgs
-)
-
-
+# 可执行文件：iot
 set(iot_executable iot)
 add_executable(${iot_executable}
   src/iot/init.cpp
   src/iot/main.cpp
 )
+target_link_libraries(${iot_executable} ${nutils})
+ament_target_dependencies(${iot_executable} rclcpp std_msgs)
 
-target_link_libraries(${iot_executable}
-  ${nutils}
-)
-
-ament_target_dependencies(${iot_executable}
-  rclcpp
-  std_msgs
-)
-
-
+# 安装
 install(TARGETS
   ${nutils}
   ${linktrack_executable}
@@ -196,7 +153,6 @@ install(TARGETS
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
-
 
 install(DIRECTORY src/utils/
   DESTINATION include/${PROJECT_NAME}/utils
@@ -212,12 +168,9 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-install(FILES
-  env_hooks/ament_prefix_path.dsv
-  env_hooks/ament_prefix_path.bash
-  DESTINATION share/${PROJECT_NAME}/hook
-)
+# ⚠️ 不再安装自定义 env hooks（ament_prefix_path.*）
 
+# 导出
 ament_export_targets(${_export_set} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   geometry_msgs
@@ -229,35 +182,3 @@ ament_export_dependencies(
 )
 
 ament_package()
-
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/env_hooks)
-
-configure_file(
-  env_hooks/package.dsv.in
-  ${CMAKE_CURRENT_BINARY_DIR}/env_hooks/package.dsv
-  @ONLY
-)
-
-install(CODE "
-  file(COPY \"${CMAKE_CURRENT_BINARY_DIR}/env_hooks/package.dsv\"
-    DESTINATION \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}\")
-")
-
-set(_nlink_parser_package_dsv_append "source;share/${PROJECT_NAME}/local_setup.bash\nsource;share/${PROJECT_NAME}/local_setup.sh\nsource;share/${PROJECT_NAME}/local_setup.dsv\nsource;share/${PROJECT_NAME}/local_setup.zsh\n")
-
-install(CODE "
-  file(APPEND \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}/package.dsv\" \"${_nlink_parser_package_dsv_append}\")
-")
-
-install(CODE [[
-  set(_nlink_parser_local_setup "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/local_setup.bash")
-  if(EXISTS "${_nlink_parser_local_setup}")
-    file(READ "${_nlink_parser_local_setup}" _nlink_parser_local_setup_content)
-    if(NOT _nlink_parser_local_setup_content MATCHES "AMENT_PREFIX_PATH")
-      set(_needle "_colcon_prefix_bash_prepend_unique_value COLCON_PREFIX_PATH \"\$_colcon_prefix_bash_COLCON_CURRENT_PREFIX\"")
-      set(_replacement "${_needle}\n_colcon_prefix_bash_prepend_unique_value AMENT_PREFIX_PATH \"\$_colcon_prefix_bash_COLCON_CURRENT_PREFIX\"")
-      string(REPLACE "${_needle}" "${_replacement}" _nlink_parser_local_setup_content "${_nlink_parser_local_setup_content}")
-    endif()
-    file(WRITE "${_nlink_parser_local_setup}" "${_nlink_parser_local_setup_content}")
-  endif()
-]])

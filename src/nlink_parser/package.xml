@@ -5,30 +5,30 @@
   <description>The nlink parser package, used for products of nooploop</description>
 
   <maintainer email="nooploop.studio@gmail.com">Samuel Hsu</maintainer>
-
-  <license>BSD</license>
-
+  <license>BSD-3-Clause</license>
   <url type="website">https://www.nooploop.com</url>
 
+  <!-- Build system -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <build_depend>geometry_msgs</build_depend>
-  <build_depend>grid_map_msgs</build_depend>
-  <build_depend>nav_msgs</build_depend>
+  <!-- Build-time deps (与 CMakeLists 中 find_package 对齐) -->
   <build_depend>rclcpp</build_depend>
-  <build_depend>rosidl_default_generators</build_depend>
   <build_depend>std_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>rosidl_default_generators</build_depend>
 
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>grid_map_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
+  <!-- Run-time deps -->
   <exec_depend>rclcpp</exec_depend>
-  <exec_depend>rosidl_default_runtime</exec_depend>
-  <exec_depend>sensor_msgs_py</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
 
+  <!-- 这是关键：只要安装消息/接口就必须属于该分组 -->
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>
