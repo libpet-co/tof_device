@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<!--
+  Simple TOF sensor model as a box (65 x 25 x 15 mm).
+  Dimensions in meters. Provides a reusable xacro macro.
+-->
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="tof_sensor">
+
+  <!-- Parameters -->
+  <xacro:arg name="parent" default="base_link"/>
+  <xacro:arg name="prefix" default="tof_sensor_"/>
+  <xacro:arg name="xyz" default="0 0 0"/>
+  <xacro:arg name="rpy" default="0 0 0"/>
+  <xacro:arg name="mass" default="0.05"/>
+
+  <!-- Dimensions (meters) -->
+  <xacro:property name="L" value="0.065"/>  <!-- length 65 mm -->
+  <xacro:property name="W" value="0.025"/>  <!-- width 25 mm  -->
+  <xacro:property name="H" value="0.015"/>  <!-- height 15 mm -->
+
+  <!-- Reusable macro -->
+  <xacro:macro name="tof_sensor" params="parent:=base_link prefix:='tof_sensor_' xyz:='0 0 0' rpy:='0 0 0' mass:=0.05">
+    <link name="${prefix}link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${L} ${W} ${H}"/>
+        </geometry>
+        <material name="${prefix}material">
+          <color rgba="0.2 0.2 0.2 1.0"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${L} ${W} ${H}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${mass}"/>
+        <!-- Box inertia about center: Ixx = 1/12 m (W^2 + H^2), etc. -->
+        <inertia
+          ixx="${mass * (W*W + H*H) / 12.0}"
+          iyy="${mass * (L*L + H*H) / 12.0}"
+          izz="${mass * (L*L + W*W) / 12.0}"
+          ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}link"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+  </xacro:macro>
+
+  <!--
+    Example usage (uncomment to instantiate as a standalone robot):
+
+    <xacro:tof_sensor parent="base_link" prefix="tof_sensor_" xyz="0 0 0" rpy="0 0 0" mass="0.05"/>
+
+    Or from CLI:
+      ros2 run xacro xacro $(ros2 pkg prefix nlink_parser)/share/nlink_parser/urdf/tofsensem.urdf.xacro \
+        parent:=base_link prefix:=tof_sensor_ xyz:="0 0 0" rpy:="0 0 0" mass:=0.05
+  -->
+
+</robot>

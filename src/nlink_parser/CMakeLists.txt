@@ -159,7 +159,7 @@ install(DIRECTORY src/utils/
   FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY launch config rviz
+install(DIRECTORY launch config rviz urdf
   DESTINATION share/${PROJECT_NAME}
 )
 
